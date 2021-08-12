@@ -1,0 +1,647 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+# Parameters
+Parameters:
+  KeyPair: 
+    Description: "The EC2 Key Pair to allow SSH access to the instance"
+    Type: "AWS::EC2::KeyPair::KeyName"
+  ImageId:
+    Description: "The ImageId for EC2 Instance"
+    Type: "String"
+    Default: "ami-09e67e426f25ce0d7"
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: 10.0.0.0/16
+    Public0:
+      CIDR: 10.0.0.0/24
+    Public1:
+      CIDR: 10.0.1.0/24
+    Private0:
+      CIDR: 10.0.2.0/24
+    Private1:
+      CIDR: 10.0.3.0/24
+
+# Resources
+Resources:
+## VPC
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock:
+        'Fn::FindInMap':
+          - SubnetConfig
+          - VPC
+          - CIDR
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'VPC'
+## Security Group for Bastion host
+  BastionSecurityGroup: 
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      VpcId: 
+        Ref: "VPC"
+      GroupDescription: "Enable SSH access via port 22"
+      SecurityGroupIngress: 
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: 'Name'
+          Value: 'BastionSecurityGroup'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'SG'
+## Security Group access to private
+  ToPrivSecurityGroup: 
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      VpcId: 
+        Ref: "VPC"
+      GroupDescription: "Enable SSH access via port 22 from bastion and traf from LB"
+      SecurityGroupIngress: 
+        - SourceSecurityGroupId: !Ref BastionSecurityGroup
+          IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+        - SourceSecurityGroupId: !Ref WebSecurityGroup
+          IpProtocol: TCP
+          FromPort: 80
+          ToPort: 80
+      Tags:
+        - Key: 'Name'
+          Value: 'ToPrivSecurityGroup'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'SG'
+## Security Group Web
+  WebSecurityGroup: 
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      VpcId: 
+        Ref: "VPC"
+      GroupDescription: "Enable web access"
+      SecurityGroupIngress: 
+        - IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: 'Name'
+          Value: 'ServerSecurityGroup'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'SG'
+## Pub subnets
+  PublicSubnet0:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock:
+        'Fn::FindInMap':
+          - SubnetConfig
+          - Public0
+          - CIDR
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-public-subnet-0'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'Subnet'
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock:
+        'Fn::FindInMap':
+          - SubnetConfig
+          - Public1
+          - CIDR
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-public-subnet-1'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'Subnet'
+## Private subnets
+  PrivateSubnet0:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock:
+        'Fn::FindInMap':
+          - SubnetConfig
+          - Private0
+          - CIDR
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-private-subnet-0'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'Subnet'
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock:
+        'Fn::FindInMap':
+          - SubnetConfig
+          - Private1
+          - CIDR
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-private-subnet-1'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'Subnet'
+## IGW
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-internet-gateway'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'IGW'
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-public-route-table'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'RT'
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+  PublicSubnetRouteTableAssociation0:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet0
+      RouteTableId:
+        Ref: PublicRouteTable
+  PublicSubnetRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet1
+      RouteTableId:
+        Ref: PublicRouteTable
+## NAT GW
+  NATIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: 'lab08-3-NAT-ip'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'NATGW'
+  NATGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId:
+        'Fn::GetAtt':
+          - NATIP
+          - AllocationId
+      SubnetId:
+        Ref: PublicSubnet0
+      Tags:
+        - Key: Name
+          Value: 'lab08-3-NAT-gateway'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'NATGW'
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-private-route-table'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'RT'
+  PrivateRouteToInternet:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NATGateway
+  PrivateSubnetRouteTableAssociation0:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet0
+      RouteTableId:
+        Ref: PrivateRouteTable
+  PrivateSubnetRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1
+      RouteTableId:
+        Ref: PrivateRouteTable
+## EC2 bastion
+  Ec2BastionInstance: 
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: t2.micro
+      KeyName: 
+        Ref: "KeyPair"
+      ImageId: "ami-0c2b8ca1dad447f8a"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y aws-cfn-bootstrap
+          export PATH="${!PATH}:/opt/aws/bin"
+          echo 'start' >> /var/log/inst.log
+          # Install the files and packages from the metadata
+          /opt/aws/bin/cfn-init -v \
+            --stack "${AWS::StackName}" \
+            --resource Ec2BastionInstance \
+            --configsets install \
+            --region "${AWS::Region}"
+          echo 'end' >> /var/log/inst.log
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-EC2-bastion'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'EC2'
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: "BastionSecurityGroup"
+          SubnetId: 
+            Ref: "PublicSubnet0" 
+    Metadata: 
+      AWS::CloudFormation::Init:
+        configSets: 
+          install: 
+            - "config1"
+        config1:
+          users:
+            epam_leodorov:
+              groups:
+                - "wheel"
+              homeDir: "/home/epam_leodorov"
+          files:
+            /home/epam_leodorov/.ssh/authorized_keys:
+              content: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCnNKtufOi23ESMZPLKU6p6nS3tnFB+13LaSplCGlI2HFzLexwU9hnWKFixHeavRi0gFv1y1Xy0EWZ1dM/C8qAv4PPmqakfU8M2pEXq2kKaoz3MDJg8vBS01pSB77h+hH0cK6EmQql5grWttgydm/byJb3YKT3AJz+5jeUIX+Xdm3j2O6+SyYFjArz+LJTybIAfAUpEs9AEd7hZh70QY7ZUYfVIbc2fmgyY3mYWVKKTEKGHWp3dlQQajYEHTl0ykaiC11bjLxukvHHm6dufQ/ambZzNxgHeI4brawZnrrUbJvXOg0sGmwBfGYRCSuRQuzbL6BqTqm7mwLHvFbIVjWGb lamz4@MBP-Andrey'
+              mode: "000644"
+              owner: "epam_leodorov"
+              group: "epam_leodorov"
+          commands:
+            usermodcmd:
+              command: 'usermod --shell /bin/bash epam_leodorov'
+              ignoreErrors: "false"
+            sudocmd:
+              command: 'echo "epam_leodorov ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/90-cloud-init-users'
+              test: 'visudo --check --file=/etc/sudoers.d/90-cloud-init-users'
+## EC2 web
+  Ec2WebInstance: 
+    Type: "AWS::EC2::Instance"
+    DependsOn: NATGateway
+    Properties:
+      InstanceType: t2.micro
+      KeyName: 
+        Ref: "KeyPair"
+      ImageId:
+        Ref: "ImageId"
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-EC2-web'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'EC2-web'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt-get update -y
+          apt-get -y install python-setuptools
+          mkdir /opt/aws
+          curl https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz | tar xz -C /opt/aws --strip-components 1
+          python2 /usr/lib/python2.7/dist-packages/easy_install.py /opt/aws/
+          echo 'start' >> /var/log/inst.log
+          # Install the files and packages from the metadata
+          /usr/local/bin/cfn-init -v \
+            --stack "${AWS::StackName}" \
+            --resource Ec2WebInstance1 \
+            --configsets install \
+            --region "${AWS::Region}"
+          echo 'end' >> /var/log/inst.log
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: "ToPrivSecurityGroup"
+          SubnetId: 
+            Ref: "PrivateSubnet1"
+    Metadata: 
+      AWS::CloudFormation::Init:
+        configSets: 
+          install: 
+            - "config1"
+        config1: 
+          packages:
+            apt: 
+              nginx: []
+          users:
+            epam_leodorov:
+              groups:
+                - "adm"
+              homeDir: "/home/epam_leodorov"
+          files:
+            /home/epam_leodorov/.ssh/authorized_keys:
+              content: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCnNKtufOi23ESMZPLKU6p6nS3tnFB+13LaSplCGlI2HFzLexwU9hnWKFixHeavRi0gFv1y1Xy0EWZ1dM/C8qAv4PPmqakfU8M2pEXq2kKaoz3MDJg8vBS01pSB77h+hH0cK6EmQql5grWttgydm/byJb3YKT3AJz+5jeUIX+Xdm3j2O6+SyYFjArz+LJTybIAfAUpEs9AEd7hZh70QY7ZUYfVIbc2fmgyY3mYWVKKTEKGHWp3dlQQajYEHTl0ykaiC11bjLxukvHHm6dufQ/ambZzNxgHeI4brawZnrrUbJvXOg0sGmwBfGYRCSuRQuzbL6BqTqm7mwLHvFbIVjWGb lamz4@MBP-Andrey'
+              mode: "000644"
+              owner: "epam_leodorov"
+              group: "epam_leodorov"
+            /var/www/html/index.html: 
+              content: !Sub |
+                <h1>Hello!</h1>
+                <br>
+                <b>Stack<b>
+                <p>"${AWS::StackName}"</p>
+                <br>
+                <b>Region</b>
+                <p>"${AWS::Region}"</p>
+                <br>
+                <b>Hostname</b>
+                <p>Ec2WebInstance</p>
+              mode: "000644"
+              owner: "root"
+              group: "root"
+          commands:
+            usermodcmd:
+              command: 'usermod --shell /bin/bash epam_leodorov'
+              ignoreErrors: "false"
+            sudocmd:
+              command: 'echo "epam_leodorov ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/90-cloud-init-users'
+              test: 'visudo --check --file=/etc/sudoers.d/90-cloud-init-users'
+          services:
+            sysvinit: 
+              nginx: 
+                enabled: "true"
+                ensureRunning: "true"
+                files: 
+                  - "/etc/nginx/nginx.conf"
+                sources: 
+                  - "/var/www/html"
+## EC2 web
+  Ec2WebInstance1: 
+    Type: "AWS::EC2::Instance"
+    DependsOn: NATGateway
+    Properties:
+      InstanceType: t2.micro
+      KeyName: 
+        Ref: "KeyPair"
+      ImageId:
+        Ref: "ImageId"
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-EC2-web1'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'EC2-web'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt-get update -y
+          apt-get -y install python-setuptools
+          mkdir /opt/aws
+          curl https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz | tar xz -C /opt/aws --strip-components 1
+          python2 /usr/lib/python2.7/dist-packages/easy_install.py /opt/aws/
+          echo 'start' >> /var/log/inst.log
+          # Install the files and packages from the metadata
+          /usr/local/bin/cfn-init -v \
+            --stack "${AWS::StackName}" \
+            --resource Ec2WebInstance1 \
+            --configsets install \
+            --region "${AWS::Region}"
+          echo 'end' >> /var/log/inst.log
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: "ToPrivSecurityGroup"
+          SubnetId: 
+            Ref: "PrivateSubnet0"
+    Metadata: 
+      AWS::CloudFormation::Init:
+        configSets: 
+          install: 
+            - "config1"
+        config1:
+          packages:
+            apt: 
+              nginx: []
+          users:
+            epam_leodorov:
+              groups:
+                - "adm"
+              homeDir: "/home/epam_leodorov"
+          files:
+            /home/epam_leodorov/.ssh/authorized_keys:
+              content: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCnNKtufOi23ESMZPLKU6p6nS3tnFB+13LaSplCGlI2HFzLexwU9hnWKFixHeavRi0gFv1y1Xy0EWZ1dM/C8qAv4PPmqakfU8M2pEXq2kKaoz3MDJg8vBS01pSB77h+hH0cK6EmQql5grWttgydm/byJb3YKT3AJz+5jeUIX+Xdm3j2O6+SyYFjArz+LJTybIAfAUpEs9AEd7hZh70QY7ZUYfVIbc2fmgyY3mYWVKKTEKGHWp3dlQQajYEHTl0ykaiC11bjLxukvHHm6dufQ/ambZzNxgHeI4brawZnrrUbJvXOg0sGmwBfGYRCSuRQuzbL6BqTqm7mwLHvFbIVjWGb lamz4@MBP-Andrey'
+              mode: "000644"
+              owner: "epam_leodorov"
+              group: "epam_leodorov"
+            /var/www/html/index.html: 
+              content: !Sub |
+                <h1>Hello!</h1>
+                <br>
+                <b>Stack<b>
+                <p>"${AWS::StackName}"</p>
+                <br>
+                <b>Region</b>
+                <p>"${AWS::Region}"</p>
+                <br>
+                <b>Hostname</b>
+                <p>Ec2WebInstance1</p>
+              mode: "000644"
+              owner: "root"
+              group: "root"
+          commands:
+            usermodcmd:
+              command: 'usermod --shell /bin/bash epam_leodorov'
+              ignoreErrors: "false"
+            sudocmd:
+              command: 'echo "epam_leodorov ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/90-cloud-init-users'
+              test: 'visudo --check --file=/etc/sudoers.d/90-cloud-init-users'
+            # runcmd: 
+            #   command: 'echo "hostname is $(hostname -f)" > /var/www/html/index.html'
+            #   env: 
+            #     SOMEENV: "pewpew"
+            #   cwd: "~"
+            #   test: "test -e /var/www/html/index.html"
+            #   ignoreErrors: "false"
+          services:
+            sysvinit: 
+              nginx: 
+                enabled: "true"
+                ensureRunning: "true"
+                files: 
+                  - "/etc/nginx/nginx.conf"
+                sources: 
+                  - "/var/www/html"
+## LB TG
+  ServerTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: '200'
+      Port: 80
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Name: ServerTG
+      TargetType: instance
+      Targets:
+        - Id: !Ref Ec2WebInstance
+          Port: 80
+        - Id: !Ref Ec2WebInstance1
+          Port: 80
+      VpcId: 
+        Ref: "VPC"
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-lb-tg'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'LB' 
+## LB
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Name: UserManagerLB
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref WebSecurityGroup
+      Type: application
+      Subnets:
+        - Ref: "PublicSubnet0"
+        - Ref: "PublicSubnet1"
+      Tags:
+        - Key: 'Name'
+          Value: 'lab08-3-lb'
+        - Key: 'Project'
+          Value: 'Cloudformation'
+        - Key: 'Role'
+          Value: 'LB'
+## LB listener
+  LBServerListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref ServerTG
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+# Outputs
+Outputs:
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt 
+      - Ec2BastionInstance
+      - PublicIp
+  SiteURL:
+    Description: Site URL
+    Value: !Join
+      - ''
+      - - 'http://'
+        - !GetAtt [ "LoadBalancer", "DNSName" ]
+  VPCId:
+    Description: VPCId of VPC
+    Value:
+      Ref: VPC
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-VPC'
+  PublicSubnet0:
+    Description: SubnetId of public subnet 0
+    Value:
+      Ref: PublicSubnet0
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-PublicSubnet0'
+  PublicSubnet1:
+    Description: SubnetId of public subnet 1
+    Value:
+      Ref: PublicSubnet1
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-PublicSubnet1'
+  PrivateSubnet0:
+    Description: SubnetId of private subnet 0
+    Value:
+      Ref: PrivateSubnet0
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-PrivateSubnet0'
+  PrivateSubnet1:
+    Description: SubnetId of private subnet 1
+    Value:
+      Ref: PrivateSubnet1
+    Export:
+      Name: !Sub '${AWS::Region}-${AWS::StackName}-PrivateSubnet1'
